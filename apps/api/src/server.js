@@ -10,7 +10,8 @@ import { transactionRoutes } from "./routes/transactions.js";
 import { inventoryRoutes } from "./routes/inventory.js";
 
 const app = Fastify({
-  logger: true
+  logger: true,
+  disableRequestLogging: true
 });
 
 app.decorate("prisma", prisma);

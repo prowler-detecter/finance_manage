@@ -33,6 +33,12 @@ const createTransactionSchema = z.object({
   force: z.boolean().optional()
 });
 
+const updateSlipSchema = z.object({
+  slipBook: z.string().optional().nullable(),
+  slipNo: z.number().int().positive().optional().nullable(),
+  force: z.boolean().optional()
+});
+
 function expectedPartnerType(type) {
   if (type === "out" || type === "sale_return" || type === "receive") return "customer";
   if (type === "in" || type === "purchase_return" || type === "pay") return "supplier";
@@ -213,6 +219,85 @@ export async function transactionRoutes(app) {
         warnings,
         data: mapTransaction(created)
       });
+    } catch (error) {
+      return reply.code(400).send({
+        message: error instanceof Error ? error.message : "参数错误"
+      });
+    }
+  });
+
+  app.patch("/transactions/:id/slip", { preHandler: [authGuard] }, async (request, reply) => {
+    const transactionId = Number(request.params.id);
+    if (!transactionId) return reply.code(400).send({ message: "交易ID无效" });
+
+    try {
+      const payload = updateSlipSchema.parse(request.body || {});
+      const force = payload.force === true;
+      const slipBook = normalizeSlipBook(payload.slipBook);
+      const slipNo = payload.slipNo || null;
+
+      const transaction = await app.prisma.transaction.findUnique({
+        where: { id: transactionId },
+        select: { id: true, type: true }
+      });
+
+      if (!transaction) return reply.code(404).send({ message: "交易不存在" });
+      if (!needSlip(transaction.type)) return reply.code(400).send({ message: "仅出库/入库支持补填或修改单号" });
+
+      if ((slipBook && !slipNo) || (!slipBook && slipNo)) {
+        return reply.code(400).send({ message: "单据簿号和单据号需要同时填写" });
+      }
+
+      const warnings = [];
+      if (slipBook && slipNo) {
+        const maxRow = await app.prisma.transaction.aggregate({
+          _max: { slipNo: true },
+          where: {
+            type: transaction.type,
+            slipBook: slipBook,
+            id: { not: transaction.id }
+          }
+        });
+        const maxUsedNo = maxRow._max.slipNo || 0;
+        const nextNo = maxUsedNo > 0 ? maxUsedNo + 1 : 1;
+        if (slipNo !== nextNo) {
+          warnings.push(`当前簿号建议下一号为 ${nextNo}，本次为 ${slipNo}`);
+        }
+
+        const duplicate = await app.prisma.transaction.findFirst({
+          where: {
+            type: transaction.type,
+            slipBook: slipBook,
+            slipNo: slipNo,
+            id: { not: transaction.id }
+          },
+          select: { id: true }
+        });
+        if (duplicate) {
+          warnings.push(`簿号 ${slipBook} 单据号 ${slipNo} 已存在`);
+        }
+      }
+
+      if (warnings.length > 0 && !force) {
+        return reply.code(409).send({
+          message: "存在风险提示，需要确认后继续",
+          warnings
+        });
+      }
+
+      const updated = await app.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: {
+          slipBook: slipBook || null,
+          slipNo: slipNo || null
+        },
+        include: { items: true }
+      });
+
+      return {
+        warnings,
+        data: mapTransaction(updated)
+      };
     } catch (error) {
       return reply.code(400).send({
         message: error instanceof Error ? error.message : "参数错误"
