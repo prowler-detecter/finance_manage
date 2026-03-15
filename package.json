@@ -1,0 +1,26 @@
+{
+  "name": "finance-system-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:web": "npm --workspace apps/web run dev",
+    "build": "npm --workspace apps/api run build && npm --workspace apps/web run build",
+    "start": "npm --workspace apps/api run start",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "npm --workspace apps/api run prisma:migrate",
+    "db:seed": "npm --workspace apps/api run prisma:seed",
+    "db:studio": "npm --workspace apps/api run prisma:studio"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>玉环宏辉有限公司财务及仓储管理系统</title>
+    <!-- 引入 SheetJS 库 -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="financial.css">
+</head>
+<body>
+
+    <aside>
+        <h2>玉环宏辉有限公司财务及仓储管理系统</h2>
+        <nav>
+            <button onclick="showPage('dashboard')" class="active" id="nav-dashboard">📊 概览仪表盘</button>
+            <button onclick="showPage('transaction')" id="nav-transaction">📝 记账登记</button>
+            <button onclick="showPage('clients')" id="nav-clients">👥 客户与欠款</button>
+            <button onclick="showPage('inventory')" id="nav-inventory">🏬 库存管理</button>
+            <button onclick="showPage('products')" id="nav-products">📦 产品管理</button>
+        </nav>
+    </aside>
+
+    <main>
+        <!-- 1. 仪表盘 -->
+        <div id="page-dashboard" class="page active">
+            <div class="header-row">
+                <h1>财务概览</h1>
+                <div class="header-actions">
+                    <span id="current-date" class="current-date"></span>
+                    <button class="btn btn-outline" onclick="exportExcel()">📊 导出 Excel</button>
+                    <button class="btn btn-outline" onclick="triggerImportJSON()">📥 导入备份</button>
+                    <button class="btn btn-primary" onclick="exportJSON()">💾 备份全数据</button>
+                    <input type="file" id="import-json-input" class="hidden" accept=".json,application/json" onchange="handleImportJSONFile(event)">
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card stat-card-danger">
+                    <h3>别人欠我们 (应收)</h3>
+                    <div class="value text-red" id="total-receivable">¥0.00</div>
+                </div>
+                <div class="stat-card stat-card-success">
+                    <h3>我们欠别人 (应付)</h3>
+                    <div class="value text-green" id="total-payable">¥0.00</div>
+                </div>
+                <div class="stat-card stat-card-primary">
+                    <h3>今日交易笔数</h3>
+                    <div class="value" id="today-count">0</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>最近流水</h3>
+                <table id="recent-table">
+                    <thead>
+                        <tr>
+                            <th>交易日期</th>
+                            <th>对象</th>
+                            <th>类型</th>
+                            <th>金额</th>
+                            <th>备注</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 2. 记账登记 -->
+        <div id="page-transaction" class="page">
+            <div class="header-row"><h1>日常记账</h1></div>
+            <div class="card card-narrow">
+                <div class="form-group">
+                    <label>交易类型</label>
+                    <select id="t-type" onchange="updateFormHints()">
+                        <option value="out">出库 (销售 - 别人欠我们)</option>
+                        <option value="in">入库 (采购 - 我们欠别人)</option>
+                        <option value="sale_return">销售退货 (客户向我们退货)</option>
+                        <option value="purchase_return">采购退货 (我们向供应商退货)</option>
+                        <option value="receive">收款 (别人还钱)</option>
+                        <option value="pay">付款 (我们还钱)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>选择客户/供应商</label>
+                    <select id="t-partner" onchange="updateReturnSourceSection();updateWarehouseSlipSection(true)"></select>
+                    <small class="link-action" onclick="showPage('clients')">+ 没找到？去添加新客户</small>
+                </div>
+
+                <div id="return-source-section" class="quick-add-panel hidden">
+                    <div class="form-group">
+                        <label>关联原交易 (可选)</label>
+                        <select id="t-source-transaction"></select>
+                        <small id="t-source-hint" class="muted-text"></small>
+                    </div>
+                    <div class="form-group">
+                        <label>原单号/外部单号 (可选)</label>
+                        <input type="text" id="t-source-ref" placeholder="例如：SO2026-001">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>交易日期</label>
+                    <input type="date" id="t-transaction-date">
+                </div>
+
+                <div id="warehouse-slip-section" class="quick-add-panel hidden">
+                    <div class="modal-grid">
+                        <div class="form-group">
+                            <label>单据簿号 (选填)</label>
+                            <input type="text" id="t-slip-book" placeholder="例如：A册" oninput="updateWarehouseSlipSection(false)">
+                        </div>
+                        <div class="form-group">
+                            <label>单据号 (选填，整数)</label>
+                            <div class="inline-input-row">
+                                <input type="number" id="t-slip-no" min="1" step="1" placeholder="例如：101" oninput="updateWarehouseSlipSection(false)">
+                                <button class="btn btn-outline btn-compact" type="button" onclick="fillNextWarehouseSlipNo()">带出下一号</button>
+                            </div>
+                        </div>
+                    </div>
+                    <small id="t-slip-hint" class="muted-text"></small>
+                </div>
+
+                <div id="product-items-section" class="form-group hidden">
+                    <div class="section-title-row">
+                        <label>产品明细 (涉及库存交易至少 1 行)</label>
+                        <div class="section-actions">
+                            <button class="btn btn-outline btn-compact" type="button" onclick="addItemRow()">+ 添加产品行</button>
+                            <button class="btn btn-outline btn-compact" type="button" onclick="toggleQuickAddProductForm()">+ 临时新增产品</button>
+                        </div>
+                    </div>
+
+                    <div id="quick-add-product-form" class="quick-add-panel hidden">
+                        <div class="quick-add-grid">
+                            <input type="text" id="quick-product-name" placeholder="产品名称">
+                            <input type="text" id="quick-product-sku" placeholder="产品编码 (选填)">
+                            <input type="text" id="quick-product-spec" placeholder="规格 (选填)">
+                            <input type="text" id="quick-product-unit" placeholder="单位 (如: 件)">
+                            <input type="number" id="quick-product-price" placeholder="默认单价" min="0" step="0.01">
+                        </div>
+                        <div class="quick-add-actions">
+                            <button class="btn btn-primary btn-compact" type="button" onclick="addProductFromQuickForm()">保存产品</button>
+                            <button class="btn btn-compact" type="button" onclick="toggleQuickAddProductForm()">取消</button>
+                        </div>
+                    </div>
+
+                    <table id="item-table">
+                        <thead>
+                            <tr>
+                                <th>产品</th>
+                                <th>编码</th>
+                                <th>规格</th>
+                                <th>单位</th>
+                                <th>数量</th>
+                                <th>单价</th>
+                                <th>小计</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div id="item-stock-warning" class="warning-text hidden"></div>
+                    <div class="item-summary-row">
+                        <span>明细汇总：<strong id="item-computed-amount">¥0.00</strong></span>
+                        <span id="amount-override-hint" class="hint-text hidden">已手工覆盖金额</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>金额</label>
+                    <input type="number" id="t-amount" placeholder="0.00" min="0" step="0.01" oninput="markAmountManualOverride()">
+                    <small id="amount-mode-hint" class="muted-text"></small>
+                </div>
+                <div class="form-group">
+                    <label>记账日期</label>
+                    <input type="date" id="t-bookkeeping-date">
+                </div>
+                <div class="form-group">
+                    <label>备注</label>
+                    <input type="text" id="t-remark" placeholder="备注...">
+                </div>
+                <button class="btn btn-primary" onclick="addTransaction()">确认登记</button>
+            </div>
+        </div>
+
+        <!-- 3. 客户管理 -->
+        <div id="page-clients" class="page">
+            <div class="header-row">
+                <h1>客户与欠款管理</h1>
+                <button class="btn btn-primary" onclick="toggleAddClientForm()">+ 新增客户</button>
+            </div>
+            <div id="add-client-form" class="card hidden add-client-form-card">
+                <h3>添加新客户/供应商</h3>
+                <div class="inline-row">
+                    <input type="text" id="new-client-name" placeholder="名称">
+                    <select id="new-client-type">
+                        <option value="customer">客户 (买方)</option>
+                        <option value="supplier">供应商 (卖方)</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="addClient()">保存</button>
+                    <button class="btn" onclick="toggleAddClientForm()">取消</button>
+                </div>
+            </div>
+            <div class="card">
+                <table id="client-table">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>类型</th>
+                            <th>当前欠款状态 (正数=欠我们)</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 4. 客户流水详情 -->
+        <div id="page-partner-ledger" class="page">
+            <div class="header-row">
+                <div>
+                    <h1 id="partner-ledger-title">客户流水详情</h1>
+                    <div id="partner-ledger-subtitle" class="muted-text"></div>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-outline" onclick="showPage('clients')">← 返回客户列表</button>
+                    <button class="btn btn-primary" onclick="exportCurrentLedger()">📊 导出当前对象流水</button>
+                </div>
+            </div>
+
+            <div class="card partner-profile-card">
+                <div class="section-title-row">
+                    <label>基础资料</label>
+                    <div class="section-actions" id="partner-profile-actions-view">
+                        <button class="btn btn-small-outline" type="button" onclick="enterPartnerProfileEditMode()">编辑资料</button>
+                    </div>
+                    <div class="section-actions hidden" id="partner-profile-actions-edit">
+                        <button class="btn btn-primary btn-compact" type="button" onclick="savePartnerProfile()">保存资料</button>
+                        <button class="btn btn-compact" type="button" onclick="cancelPartnerProfileEditMode()">取消</button>
+                    </div>
+                </div>
+
+                <div id="partner-profile-view">
+                    <div class="profile-grid">
+                        <div class="profile-item"><span class="profile-label">联系人</span><span class="profile-value" id="profile-contact-view">-</span></div>
+                        <div class="profile-item"><span class="profile-label">联系电话</span><span class="profile-value" id="profile-phone-view">-</span></div>
+                        <div class="profile-item profile-item-full"><span class="profile-label">地址</span><span class="profile-value" id="profile-address-view">-</span></div>
+                        <div class="profile-item profile-item-full"><span class="profile-label">备注</span><span class="profile-value" id="profile-remark-view">-</span></div>
+                    </div>
+                </div>
+
+                <div id="partner-profile-edit" class="hidden">
+                    <div class="profile-grid">
+                        <div class="form-group">
+                            <label for="profile-contact-input">联系人</label>
+                            <input type="text" id="profile-contact-input" placeholder="联系人姓名">
+                        </div>
+                        <div class="form-group">
+                            <label for="profile-phone-input">联系电话</label>
+                            <input type="text" id="profile-phone-input" placeholder="手机号/座机">
+                        </div>
+                        <div class="form-group profile-item-full">
+                            <label for="profile-address-input">地址</label>
+                            <input type="text" id="profile-address-input" placeholder="联系地址">
+                        </div>
+                        <div class="form-group profile-item-full">
+                            <label for="profile-remark-input">备注</label>
+                            <textarea id="profile-remark-input" rows="3" placeholder="客户/供应商资料备注"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-grid ledger-stats">
+                <div class="stat-card stat-card-primary">
+                    <h3>流水笔数</h3>
+                    <div class="value" id="ledger-count">0</div>
+                </div>
+                <div class="stat-card stat-card-primary">
+                    <h3>交易总金额</h3>
+                    <div class="value" id="ledger-total">¥0.00</div>
+                </div>
+                <div class="stat-card stat-card-primary">
+                    <h3>当前往来余额</h3>
+                    <div class="value" id="ledger-balance">¥0.00</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>流水明细</h3>
+                <table id="partner-ledger-table">
+                    <thead>
+                        <tr>
+                            <th>单号</th>
+                            <th>交易日期</th>
+                            <th>类型</th>
+                            <th>金额</th>
+                            <th>产品明细</th>
+                            <th>备注</th>
+                            <th>操作</th>
+                            <th>单据簿号</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div id="partner-ledger-empty" class="muted-text hidden">当前对象暂无流水记录。</div>
+            </div>
+        </div>
+
+        <!-- 5. 库存管理 -->
+        <div id="page-inventory" class="page">
+            <div class="header-row">
+                <h1>库存管理</h1>
+            </div>
+            <div class="card">
+                <h3>库存总览与盘点调整</h3>
+                <table id="inventory-table">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>编码</th>
+                            <th>规格</th>
+                            <th>单位</th>
+                            <th>当前库存</th>
+                            <th>最近业务日期</th>
+                            <th>最近一次更新时间</th>
+                            <th>库存依据摘要</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 6. 产品管理 -->
+        <div id="page-products" class="page">
+            <div class="header-row"><h1>产品管理</h1></div>
+            <div class="card">
+                <h3>新增产品</h3>
+                <div class="product-form-grid">
+                    <input type="text" id="new-product-name" placeholder="产品名称">
+                    <input type="text" id="new-product-sku" placeholder="产品编码 (选填)">
+                    <input type="text" id="new-product-spec" placeholder="规格 (选填)">
+                    <input type="text" id="new-product-unit" placeholder="单位 (如: 件)">
+                    <input type="number" id="new-product-price" placeholder="默认单价" min="0" step="0.01">
+                    <button class="btn btn-primary" onclick="addProduct()">保存产品</button>
+                </div>
+            </div>
+            <div class="card">
+                <table id="product-table">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>编码</th>
+                            <th>规格</th>
+                            <th>单位</th>
+                            <th>默认单价</th>
+                            <th>当前库存</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <div id="export-range-modal" class="modal hidden" onclick="handleExportRangeModalBackdrop(event)">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="export-range-title">
+            <h3 id="export-range-title">选择导出时间范围</h3>
+            <div class="modal-grid">
+                <div class="form-group">
+                    <label for="export-start-date">开始日期</label>
+                    <input type="date" id="export-start-date">
+                </div>
+                <div class="form-group">
+                    <label for="export-end-date">结束日期</label>
+                    <input type="date" id="export-end-date">
+                </div>
+            </div>
+            <small class="muted-text">不填开始表示不限制起始，不填结束表示不限制结束。</small>
+            <div class="modal-actions">
+                <button class="btn btn-outline" onclick="clearExportRangeSelection()">清空</button>
+                <button class="btn" onclick="cancelExportRangeSelection()">取消</button>
+                <button class="btn btn-primary" onclick="confirmExportRangeSelection()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="stock-adjust-modal" class="modal hidden" onclick="handleStockAdjustModalBackdrop(event)">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="stock-adjust-title">
+            <h3 id="stock-adjust-title">库存盘点/调整</h3>
+            <div id="stock-adjust-product-info" class="muted-text"></div>
+
+            <div class="modal-grid">
+                <div class="form-group">
+                    <label>调整方式</label>
+                    <select id="stock-adjust-mode" onchange="updateStockAdjustPreview()">
+                        <option value="set">实盘覆写</option>
+                        <option value="delta">增减调整</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label id="stock-adjust-quantity-label">实盘数量</label>
+                    <input type="number" id="stock-adjust-quantity" step="1" oninput="updateStockAdjustPreview()">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>业务日期</label>
+                <input type="date" id="stock-adjust-biz-date" oninput="updateStockAdjustPreview()">
+            </div>
+
+            <div class="form-group">
+                <label>备注</label>
+                <input type="text" id="stock-adjust-remark" placeholder="例如：月度盘点差异修正">
+            </div>
+            <small id="stock-adjust-preview" class="muted-text"></small>
+
+            <div class="modal-actions">
+                <button class="btn" onclick="closeStockAdjustModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveStockAdjustment()">确认保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/01-core.js"></script>
+    <script src="js/02-dashboard-ledger.js"></script>
+    <script src="js/03-inventory-ui.js"></script>
+    <script src="js/04-transaction-form.js"></script>
+    <script src="js/05-stock-engine-export.js"></script>
+    <script src="js/06-io-navigation-init.js"></script>
+</body>
+</html>

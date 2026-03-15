@@ -1,0 +1,128 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PartnerType {
+  customer
+  supplier
+}
+
+enum TransactionType {
+  out
+  in
+  sale_return
+  purchase_return
+  receive
+  pay
+}
+
+enum StockAdjustMode {
+  set
+  delta
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+}
+
+model Partner {
+  id            Int           @id @default(autoincrement())
+  name          String
+  type          PartnerType
+  contactName   String?       @map("contact_name")
+  phone         String?
+  address       String?
+  profileRemark String?       @map("profile_remark")
+  transactions  Transaction[]
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+}
+
+model Product {
+  id               Int               @id @default(autoincrement())
+  name             String
+  sku              String?
+  spec             String?
+  unit             String
+  defaultUnitPrice Decimal           @default(0) @db.Decimal(18, 2) @map("default_unit_price")
+  active           Boolean           @default(true)
+  items            TransactionItem[]
+  stockAdjustments StockAdjustment[]
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  @@index([active])
+}
+
+model Transaction {
+  id               Int               @id @default(autoincrement())
+  transactionDate  DateTime          @map("transaction_date")
+  bookkeepingDate  DateTime          @map("bookkeeping_date")
+  recordedAt       DateTime          @map("recorded_at")
+  type             TransactionType
+  partnerId        Int               @map("partner_id")
+  partner          Partner           @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  amount           Decimal           @db.Decimal(18, 2)
+  computedAmount   Decimal?          @db.Decimal(18, 2) @map("computed_amount")
+  remark           String?
+  sourceTransactionId Int?           @map("source_transaction_id")
+  sourceTransaction   Transaction?   @relation("SourceTransaction", fields: [sourceTransactionId], references: [id], onDelete: SetNull)
+  sourceRef        String?           @map("source_ref")
+  slipBook         String?           @map("slip_book")
+  slipNo           Int?              @map("slip_no")
+  items            TransactionItem[]
+  sourceChildren   Transaction[]     @relation("SourceTransaction")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  @@index([partnerId])
+  @@index([type, slipBook, slipNo])
+  @@index([transactionDate, recordedAt, id])
+}
+
+model TransactionItem {
+  id             Int         @id @default(autoincrement())
+  transactionId  Int         @map("transaction_id")
+  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  productId      Int         @map("product_id")
+  product        Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity       Int
+  unitPrice      Decimal     @db.Decimal(18, 2) @map("unit_price")
+  lineAmount     Decimal     @db.Decimal(18, 2) @map("line_amount")
+  snapshotName   String      @map("snapshot_name")
+  snapshotSku    String?     @map("snapshot_sku")
+  snapshotSpec   String?     @map("snapshot_spec")
+  snapshotUnit   String?     @map("snapshot_unit")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  @@index([transactionId])
+  @@index([productId])
+}
+
+model StockAdjustment {
+  id         Int             @id @default(autoincrement())
+  productId  Int             @map("product_id")
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  mode       StockAdjustMode
+  changeQty  Int             @map("change_qty")
+  beforeQty  Int             @map("before_qty")
+  afterQty   Int             @map("after_qty")
+  bizDate    DateTime        @map("biz_date")
+  remark     String?
+  recordedAt DateTime        @map("recorded_at")
+  operator   String?
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+
+  @@index([productId, bizDate, recordedAt, id])
+}
