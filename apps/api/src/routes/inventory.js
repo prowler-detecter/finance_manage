@@ -11,6 +11,13 @@ const createAdjustmentSchema = z.object({
   remark: z.string().optional().nullable()
 });
 
+const previewAdjustmentSchema = z.object({
+  productId: z.number().int().positive(),
+  mode: z.enum(["set", "delta"]),
+  quantity: z.number().int(),
+  bizDate: z.string().min(1)
+});
+
 function withPendingAdjustment(events, pending) {
   const marker = `pending-${Date.now()}-${Math.random()}`;
   const event = {
@@ -52,11 +59,60 @@ export async function inventoryRoutes(app) {
         stock: result.stock,
         latestBusinessDate: summary.latestBusinessDate,
         latestBusinessType: summary.latestBusinessType,
+        lastStockUpdatedAt: summary.latestRecordedAt,
         basisSummary: summary.basisSummary
       };
     });
 
     return { data };
+  });
+
+  app.post("/stock-adjustments/preview", { preHandler: [authGuard] }, async (request, reply) => {
+    try {
+      const payload = previewAdjustmentSchema.parse(request.body || {});
+      parseISODateOrThrow(payload.bizDate, "bizDate");
+
+      if (payload.mode === "set" && payload.quantity < 0) {
+        return reply.code(400).send({ message: "实盘数量不能为负数" });
+      }
+      if (payload.mode === "delta" && payload.quantity === 0) {
+        return reply.code(400).send({ message: "增减数量不能为0" });
+      }
+
+      const product = await app.prisma.product.findUnique({
+        where: { id: payload.productId }
+      });
+      if (!product) return reply.code(404).send({ message: "产品不存在" });
+
+      const { transactions, adjustments } = await loadStockData(app.prisma);
+      const events = buildStockEvents(payload.productId, transactions, adjustments);
+      const pending = {
+        mode: payload.mode,
+        quantity: payload.quantity,
+        bizDate: payload.bizDate,
+        recordedAt: new Date().toISOString(),
+        sortId: Date.now()
+      };
+      const { marker, merged } = withPendingAdjustment(events, pending);
+      const preview = computeStock(merged, marker);
+
+      if (preview.markerBefore == null || preview.markerAfter == null) {
+        return reply.code(500).send({ message: "库存预演失败" });
+      }
+
+      return {
+        data: {
+          beforeQty: preview.markerBefore,
+          afterQty: preview.markerAfter,
+          changeQty: preview.markerAfter - preview.markerBefore,
+          currentStock: preview.stock
+        }
+      };
+    } catch (error) {
+      return reply.code(400).send({
+        message: error instanceof Error ? error.message : "参数错误"
+      });
+    }
   });
 
   app.post("/stock-adjustments", { preHandler: [authGuard] }, async (request, reply) => {

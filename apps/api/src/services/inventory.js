@@ -98,6 +98,7 @@ export function summarizeBasis(events) {
     return {
       latestBusinessDate: null,
       latestBusinessType: null,
+      latestRecordedAt: null,
       basisSummary: "暂无库存事件"
     };
   }
@@ -122,6 +123,7 @@ export function summarizeBasis(events) {
   return {
     latestBusinessDate: latest.businessDate,
     latestBusinessType: eventTypeLabel(latest),
+    latestRecordedAt: latest.recordedAt,
     basisSummary
   };
 }
