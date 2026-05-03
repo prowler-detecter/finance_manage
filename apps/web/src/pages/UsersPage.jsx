@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "../lib/api";
 import { useAuth } from "../state/AuthContext";
@@ -20,10 +20,13 @@ export default function UsersPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const canManageRoles = user?.role === "super_admin";
+  const userKeywordFocusRef = useRef(false);
   const [registrationFilter, setRegistrationFilter] = useState("pending");
   const [userKeyword, setUserKeyword] = useState("");
   const [resetPwdUserId, setResetPwdUserId] = useState(null);
   const [resetPwd, setResetPwd] = useState("");
+  const [renameUserId, setRenameUserId] = useState(null);
+  const [renameUsername, setRenameUsername] = useState("");
 
   const registrationsQuery = useQuery({
     queryKey: ["admin-registrations", registrationFilter],
@@ -86,12 +89,28 @@ export default function UsersPage() {
     }
   });
 
+  const renameMutation = useMutation({
+    mutationFn: async ({ id, username }) =>
+      apiRequest(`/admin/users/${id}/username`, {
+        method: "PATCH",
+        body: JSON.stringify({ username })
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    }
+  });
+
   const filteredUsers = useMemo(() => {
     const rows = usersQuery.data || [];
     const keyword = String(userKeyword || "").trim().toLowerCase();
     if (!keyword) return rows;
     return rows.filter((row) => String(row.username || "").toLowerCase().includes(keyword));
   }, [usersQuery.data, userKeyword]);
+
+  function handleUserKeywordChange(event) {
+    if (!userKeywordFocusRef.current) return;
+    setUserKeyword(event.target.value);
+  }
 
   async function handleReview(row, action) {
     const actionText = action === "approve" ? "通过" : "拒绝";
@@ -146,6 +165,28 @@ export default function UsersPage() {
       window.alert("密码已重置");
     } catch (error) {
       window.alert(error.message || "重置密码失败");
+    }
+  }
+
+  async function submitRenameUsername(targetUserId) {
+    const username = String(renameUsername || "").trim();
+    if (!username) {
+      window.alert("请输入新用户名");
+      return;
+    }
+
+    try {
+      await renameMutation.mutateAsync({ id: targetUserId, username });
+      setRenameUserId(null);
+      setRenameUsername("");
+      if (Number(user?.id || 0) === Number(targetUserId || 0)) {
+        window.alert("当前登录账号用户名已修改，页面将刷新以同步信息。");
+        window.location.reload();
+        return;
+      }
+      window.alert("用户名已更新");
+    } catch (error) {
+      window.alert(error.message || "用户名更新失败");
     }
   }
 
@@ -220,10 +261,21 @@ export default function UsersPage() {
           <h3>系统用户</h3>
           <div className="section-actions">
             <input
+              name="user-search-keyword"
+              autoComplete="new-password"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
               type="text"
               placeholder="按用户名检索"
               value={userKeyword}
-              onChange={(e) => setUserKeyword(e.target.value)}
+              onFocus={() => {
+                userKeywordFocusRef.current = true;
+              }}
+              onBlur={() => {
+                userKeywordFocusRef.current = false;
+              }}
+              onChange={handleUserKeywordChange}
             />
             <span className="muted-text">匹配 {filteredUsers.length} / {(usersQuery.data || []).length} 条</span>
           </div>
@@ -281,6 +333,16 @@ export default function UsersPage() {
                       >
                         重置密码
                       </button>
+                      <button
+                        className="btn btn-small-outline"
+                        onClick={() => {
+                          setRenameUserId(row.id);
+                          setRenameUsername(row.username || "");
+                        }}
+                        disabled={row.role === "super_admin" && user?.role !== "super_admin"}
+                      >
+                        修改用户名
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -326,6 +388,47 @@ export default function UsersPage() {
               disabled={resetPwdMutation.isPending}
             >
               {resetPwdMutation.isPending ? "保存中..." : "确认重置"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={`modal${renameUserId ? "" : " hidden"}`}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setRenameUserId(null);
+            setRenameUsername("");
+          }
+        }}
+      >
+        <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="rename-user-title">
+          <h3 id="rename-user-title">修改用户名</h3>
+          <div className="form-group">
+            <label>新用户名</label>
+            <input
+              type="text"
+              value={renameUsername}
+              onChange={(e) => setRenameUsername(e.target.value)}
+              placeholder="请输入新用户名"
+            />
+          </div>
+          <div className="modal-actions">
+            <button
+              className="btn"
+              onClick={() => {
+                setRenameUserId(null);
+                setRenameUsername("");
+              }}
+            >
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => renameUserId && submitRenameUsername(renameUserId)}
+              disabled={renameMutation.isPending}
+            >
+              {renameMutation.isPending ? "保存中..." : "确认修改"}
             </button>
           </div>
         </div>

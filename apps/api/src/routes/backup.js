@@ -85,8 +85,8 @@ function scopeKeys(scope) {
 
 function ensureScopePermission(request, scope) {
   const role = request.authUser?.role || request.user?.role || "user";
-  if (!["admin", "super_admin"].includes(role) && scope !== "business") {
-    const error = new Error("普通用户仅可操作业务数据备份/恢复");
+  if (!["admin", "super_admin"].includes(role)) {
+    const error = new Error("普通用户无备份与恢复权限");
     error.statusCode = 403;
     throw error;
   }
