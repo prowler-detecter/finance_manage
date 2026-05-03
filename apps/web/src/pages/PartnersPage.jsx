@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "../lib/api";
+import { useAuth } from "../state/AuthContext";
 
 function typeLabel(type) {
   if (type === "out") return "出库";
@@ -646,6 +647,10 @@ function downloadTextFile(filename, content, mimeType) {
 }
 
 export default function PartnersPage() {
+  const { user } = useAuth();
+  const canExportFiles = ["admin", "super_admin"].includes(String(user?.role || ""));
+  const canSeeLedgerAmounts = ["admin", "super_admin"].includes(String(user?.role || ""));
+  const hideDebtStatus = String(user?.role || "user") === "user";
   const queryClient = useQueryClient();
   const [showAddForm, setShowAddForm] = useState(false);
   const [currentPartnerId, setCurrentPartnerId] = useState(null);
@@ -947,6 +952,10 @@ export default function PartnersPage() {
   }
 
   function openExportRangeModal(partner = currentPartner) {
+    if (!canExportFiles) {
+      window.alert("普通用户无导出权限");
+      return;
+    }
     if (!partner) return;
     setExportRangeModal({
       open: true,
@@ -974,6 +983,10 @@ export default function PartnersPage() {
   }
 
   async function confirmExportRangeSelection(format) {
+    if (!canExportFiles) {
+      window.alert("普通用户无导出权限");
+      return;
+    }
     const partner = exportTargetPartner;
     if (!partner) return;
     const start = String(exportRangeModal.startDate || "").trim();
@@ -999,6 +1012,10 @@ export default function PartnersPage() {
   }
 
   function openTotalExportModal() {
+    if (!canExportFiles) {
+      window.alert("普通用户无导出权限");
+      return;
+    }
     setTotalExportModal({
       open: true,
       startDate: "",
@@ -1036,6 +1053,10 @@ export default function PartnersPage() {
   }
 
   async function exportAllLedgersXlsx() {
+    if (!canExportFiles) {
+      window.alert("普通用户无导出权限");
+      return;
+    }
     const selectedIds = (totalExportModal.selectedPartnerIds || []).map((id) => Number(id));
     if (selectedIds.length === 0) {
       window.alert("请至少勾选 1 个客户/供应商");
@@ -1206,7 +1227,7 @@ export default function PartnersPage() {
     }
   }
 
-  const exportRangeModalView = (
+  const exportRangeModalView = canExportFiles ? (
     <div
       className={`modal${exportRangeModal.open ? "" : " hidden"}`}
       onClick={(e) => e.target === e.currentTarget && closeExportRangeModal()}
@@ -1259,9 +1280,9 @@ export default function PartnersPage() {
         </div>
       </div>
     </div>
-  );
+  ) : null;
 
-  const totalExportModalView = (
+  const totalExportModalView = canExportFiles ? (
     <div
       className={`modal${totalExportModal.open ? "" : " hidden"}`}
       onClick={(e) => e.target === e.currentTarget && !totalExporting && closeTotalExportModal()}
@@ -1341,7 +1362,7 @@ export default function PartnersPage() {
         </div>
       </div>
     </div>
-  );
+  ) : null;
 
   if (partnersQuery.isLoading || transactionsQuery.isLoading) {
     return (
@@ -1376,9 +1397,11 @@ export default function PartnersPage() {
         <div className="header-row">
           <h1>客户与欠款管理</h1>
           <div className="header-actions">
-            <button className="btn btn-outline" type="button" onClick={openTotalExportModal}>
-              📦 总流水导出
-            </button>
+            {canExportFiles ? (
+              <button className="btn btn-outline" type="button" onClick={openTotalExportModal}>
+                📦 总流水导出
+              </button>
+            ) : null}
             <button className="btn btn-primary" onClick={() => setShowAddForm((v) => !v)}>
               + 新增客户
             </button>
@@ -1428,22 +1451,24 @@ export default function PartnersPage() {
               <tr>
                 <th>名称</th>
                 <th>类型</th>
-                <th>当前欠款状态 (正数=欠我们)</th>
+                {hideDebtStatus ? null : <th>当前欠款状态 (正数=欠我们)</th>}
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
               {filteredPartners.map((p) => {
-                const balance = calculateBalance(p.id, transactions);
                 let statusText = "两清";
                 let statusClass = "status-clear";
 
-                if (balance > 0) {
-                  statusText = `对方欠我们 ${formatCurrency(balance)}`;
-                  statusClass = "status-receivable";
-                } else if (balance < 0) {
-                  statusText = `我们欠对方 ${formatCurrency(Math.abs(balance))}`;
-                  statusClass = "status-payable";
+                if (!hideDebtStatus) {
+                  const balance = calculateBalance(p.id, transactions);
+                  if (balance > 0) {
+                    statusText = `对方欠我们 ${formatCurrency(balance)}`;
+                    statusClass = "status-receivable";
+                  } else if (balance < 0) {
+                    statusText = `我们欠对方 ${formatCurrency(Math.abs(balance))}`;
+                    statusClass = "status-payable";
+                  }
                 }
 
                 return (
@@ -1452,15 +1477,17 @@ export default function PartnersPage() {
                       <strong>{p.name}</strong>
                     </td>
                     <td>{p.type === "customer" ? "客户" : "供应商"}</td>
-                    <td className={`status-cell ${statusClass}`}>{statusText}</td>
+                    {hideDebtStatus ? null : <td className={`status-cell ${statusClass}`}>{statusText}</td>}
                     <td>
                       <div className="client-actions">
                         <button className="btn btn-small-outline" onClick={() => openLedger(p)}>
                           查看流水
                         </button>
-                        <button className="btn btn-small-outline" onClick={() => openExportRangeModal(p)}>
-                          导出流水
-                        </button>
+                        {canExportFiles ? (
+                          <button className="btn btn-small-outline" onClick={() => openExportRangeModal(p)}>
+                            导出流水
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -1492,9 +1519,11 @@ export default function PartnersPage() {
           >
             ← 返回客户列表
           </button>
-          <button className="btn btn-primary" onClick={() => openExportRangeModal(currentPartner)}>
-            📊 导出当前对象流水（xlsx/xls）
-          </button>
+          {canExportFiles ? (
+            <button className="btn btn-primary" onClick={() => openExportRangeModal(currentPartner)}>
+              📊 导出当前对象流水（xlsx/xls）
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -1597,14 +1626,18 @@ export default function PartnersPage() {
           <h3>流水笔数</h3>
           <div className="value">{ledgerSummary.count}</div>
         </div>
-        <div className="stat-card stat-card-primary">
-          <h3>交易总金额</h3>
-          <div className="value">{formatCurrency(ledgerSummary.totalAmount)}</div>
-        </div>
-        <div className="stat-card stat-card-primary">
-          <h3>当前往来余额</h3>
-          <div className="value">{formatCurrency(ledgerSummary.balance)}</div>
-        </div>
+        {canSeeLedgerAmounts ? (
+          <>
+            <div className="stat-card stat-card-primary">
+              <h3>交易总金额</h3>
+              <div className="value">{formatCurrency(ledgerSummary.totalAmount)}</div>
+            </div>
+            <div className="stat-card stat-card-primary">
+              <h3>当前往来余额</h3>
+              <div className="value">{formatCurrency(ledgerSummary.balance)}</div>
+            </div>
+          </>
+        ) : null}
       </div>
 
       <div className="card">

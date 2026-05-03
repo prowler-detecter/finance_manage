@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { useAuth } from "./state/AuthContext";
 import LoginPage from "./pages/LoginPage";
@@ -11,6 +12,7 @@ import UsersPage from "./pages/UsersPage";
 
 function ProtectedLayout() {
   const { user, logout } = useAuth();
+  const [mobileNavCollapsed, setMobileNavCollapsed] = useState(true);
   if (!user) return <Navigate to="/login" replace />;
   const isManager = ["admin", "super_admin"].includes(String(user?.role || ""));
   const roleTextMap = {
@@ -19,6 +21,7 @@ function ProtectedLayout() {
   };
   const roleText = roleTextMap[String(user?.role || "")] || "";
   const sidebarUserText = roleText ? `${user.username}（${roleText}）` : user.username;
+  const navListId = "sidebar-nav-list";
 
   return (
     <>
@@ -26,9 +29,22 @@ function ProtectedLayout() {
         <div className="top-system-bar-title">玉环宏辉塑料模具有限公司——财务及仓储管理系统</div>
       </header>
       <div className="layout">
-        <aside className="sidebar">
-          <div className="sidebar-user">{sidebarUserText}</div>
-          <nav className="nav-list">
+        <aside className={`sidebar${mobileNavCollapsed ? " is-collapsed" : ""}`}>
+          <div className="sidebar-user desktop-only">{sidebarUserText}</div>
+          <div className="sidebar-user-toolbar mobile-only">
+            <button
+              type="button"
+              className="sidebar-user-toggle"
+              onClick={() => setMobileNavCollapsed((prev) => !prev)}
+              aria-expanded={!mobileNavCollapsed}
+              aria-controls={navListId}
+              aria-label={mobileNavCollapsed ? "展开导航菜单" : "收起导航菜单"}
+            >
+              <span className="sidebar-user-name">{sidebarUserText}</span>
+              <span className="sidebar-toggle-text">{mobileNavCollapsed ? "展开" : "收起"}</span>
+            </button>
+          </div>
+          <nav id={navListId} className="nav-list">
             <NavLink className={({ isActive }) => `nav-link${isActive ? " active" : ""}`} to="/dashboard">
               📊 概览仪表盘
             </NavLink>
@@ -53,7 +69,7 @@ function ProtectedLayout() {
               </NavLink>
             ) : null}
           </nav>
-          <button className="btn btn-outline" onClick={logout}>
+          <button className="btn btn-outline sidebar-logout" onClick={logout}>
             退出登录
           </button>
         </aside>

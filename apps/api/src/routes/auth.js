@@ -24,6 +24,10 @@ const updateActiveSchema = z.object({
   active: z.boolean()
 });
 
+const updateUsernameSchema = z.object({
+  username: z.string().min(1, "用户名不能为空").max(64)
+});
+
 const resetPasswordSchema = z.object({
   password: z.string().min(1, "密码不能为空").max(128)
 });
@@ -293,6 +297,59 @@ export async function authRoutes(app) {
       return reply.code(400).send({
         message: error instanceof Error ? error.message : "参数错误"
       });
+    }
+  });
+
+  app.patch("/admin/users/:id/username", { preHandler: [authGuard, adminGuard] }, async (request, reply) => {
+    const userId = Number(request.params.id);
+    if (!userId) return reply.code(400).send({ message: "用户ID无效" });
+
+    try {
+      const payload = updateUsernameSchema.parse(request.body || {});
+      const username = normalizeUsername(payload.username);
+      if (!username) {
+        return reply.code(400).send({ message: "用户名不能为空" });
+      }
+
+      const operatorRole = String(request.authUser?.role || "user");
+      const target = await app.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true, username: true }
+      });
+      if (!target) return reply.code(404).send({ message: "用户不存在" });
+      if (target.role === "super_admin" && operatorRole !== "super_admin") {
+        return reply.code(403).send({ message: "仅最高管理员可修改最高管理员用户名" });
+      }
+
+      const duplicate = await app.prisma.user.findFirst({
+        where: {
+          username,
+          id: {
+            not: userId
+          }
+        },
+        select: { id: true }
+      });
+      if (duplicate) {
+        return reply.code(409).send({ message: "用户名已存在，请更换后重试" });
+      }
+
+      const updated = await app.prisma.user.update({
+        where: { id: userId },
+        data: { username }
+      });
+      return {
+        data: {
+          id: updated.id,
+          username: updated.username
+        }
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "参数错误";
+      if (message.includes("Unique constraint")) {
+        return reply.code(409).send({ message: "用户名已存在，请更换后重试" });
+      }
+      return reply.code(400).send({ message });
     }
   });
 

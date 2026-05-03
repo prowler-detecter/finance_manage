@@ -87,12 +87,12 @@ function emptyReport() {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const isAdmin = ["admin", "super_admin"].includes(String(user?.role || ""));
+  const canManageDataExports = ["admin", "super_admin"].includes(String(user?.role || ""));
   const importInputRef = useRef(null);
   const today = todayLocal();
 
-  const [backupScope, setBackupScope] = useState(isAdmin ? "system" : "business");
-  const [restoreScope, setRestoreScope] = useState(isAdmin ? "system" : "business");
+  const [backupScope, setBackupScope] = useState(canManageDataExports ? "system" : "business");
+  const [restoreScope, setRestoreScope] = useState(canManageDataExports ? "system" : "business");
   const [restoreStrategy, setRestoreStrategy] = useState("merge");
   const [conflictMode, setConflictMode] = useState("skip");
   const [backupModalOpen, setBackupModalOpen] = useState(false);
@@ -124,6 +124,10 @@ export default function DashboardPage() {
   const todayCount = (transactionsQuery.data || []).filter((tx) => tx.transactionDate === today).length;
 
   async function exportCsv() {
+    if (!canManageDataExports) {
+      window.alert("普通用户无导出权限");
+      return;
+    }
     const rows = recentRows.map((tx) => [
       tx.transactionDate,
       partnerNameMap.get(tx.partnerId) || `对象#${tx.partnerId}`,
@@ -135,6 +139,10 @@ export default function DashboardPage() {
   }
 
   async function backupJson() {
+    if (!canManageDataExports) {
+      window.alert("普通用户无备份权限");
+      return;
+    }
     setWorking(true);
     try {
       const res = await apiRequest(`/backup/json?scope=${backupScope}`);
@@ -152,6 +160,10 @@ export default function DashboardPage() {
   }
 
   async function runPreview(backupObj) {
+    if (!canManageDataExports) {
+      window.alert("普通用户无备份权限");
+      return;
+    }
     const res = await apiRequest("/backup/json/preview", {
       method: "POST",
       body: JSON.stringify({
@@ -168,6 +180,10 @@ export default function DashboardPage() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    if (!canManageDataExports) {
+      window.alert("普通用户无备份权限");
+      return;
+    }
 
     setWorking(true);
     try {
@@ -184,6 +200,10 @@ export default function DashboardPage() {
 
   async function executeRestore() {
     if (!pendingBackup) return;
+    if (!canManageDataExports) {
+      window.alert("普通用户无备份权限");
+      return;
+    }
     setWorking(true);
     try {
       const res = await apiRequest("/backup/json/restore", {
@@ -207,7 +227,7 @@ export default function DashboardPage() {
     }
   }
 
-  const scopeOptions = isAdmin
+  const scopeOptions = canManageDataExports
     ? [
         { value: "system", label: "整系统（业务+账号）" },
         { value: "business", label: "仅业务数据" },
@@ -233,12 +253,16 @@ export default function DashboardPage() {
         <h1>财务概览</h1>
         <div className="header-actions">
           <span className="current-date">{today.replaceAll("-", "/")}</span>
-          <button className="btn btn-outline" onClick={() => setBackupModalOpen(true)} disabled={working}>
-            🗂️ 备份与恢复
-          </button>
-          <button className="btn btn-outline" onClick={exportCsv} disabled={working}>
-            📊 导出 Excel
-          </button>
+          {canManageDataExports ? (
+            <>
+              <button className="btn btn-outline" onClick={() => setBackupModalOpen(true)} disabled={working}>
+                🗂️ 备份与恢复
+              </button>
+              <button className="btn btn-outline" onClick={exportCsv} disabled={working}>
+                📊 导出 Excel
+              </button>
+            </>
+          ) : null}
           <input
             ref={importInputRef}
             className="hidden"
@@ -250,14 +274,18 @@ export default function DashboardPage() {
       </div>
 
       <div className="stats-grid">
-        <div className="stat-card stat-card-danger">
-          <h3>别人欠我们 (应收)</h3>
-          <div className="value text-red">{formatCurrency(summary.receivable)}</div>
-        </div>
-        <div className="stat-card stat-card-success">
-          <h3>我们欠别人 (应付)</h3>
-          <div className="value text-green">{formatCurrency(summary.payable)}</div>
-        </div>
+        {canManageDataExports ? (
+          <>
+            <div className="stat-card stat-card-danger">
+              <h3>别人欠我们 (应收)</h3>
+              <div className="value text-red">{formatCurrency(summary.receivable)}</div>
+            </div>
+            <div className="stat-card stat-card-success">
+              <h3>我们欠别人 (应付)</h3>
+              <div className="value text-green">{formatCurrency(summary.payable)}</div>
+            </div>
+          </>
+        ) : null}
         <div className="stat-card stat-card-primary">
           <h3>今日交易笔数</h3>
           <div className="value">{todayCount}</div>
@@ -300,7 +328,7 @@ export default function DashboardPage() {
         </table>
       </div>
 
-      {backupModalOpen ? (
+      {canManageDataExports && backupModalOpen ? (
         <div className="modal" onClick={(event) => event.target === event.currentTarget && setBackupModalOpen(false)}>
           <div className="modal-card modal-card-backup" role="dialog" aria-modal="true" aria-labelledby="backup-restore-title">
             <h3 id="backup-restore-title">备份与恢复</h3>
@@ -409,7 +437,7 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      {previewState ? (
+      {canManageDataExports && previewState ? (
         <div className="modal">
           <div className="modal-card">
             <h3>导入预检查结果</h3>
