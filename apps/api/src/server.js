@@ -6,12 +6,16 @@ import { prisma } from "./db.js";
 import { authRoutes } from "./routes/auth.js";
 import { partnerRoutes } from "./routes/partners.js";
 import { productRoutes } from "./routes/products.js";
+import { materialRoutes } from "./routes/materials.js";
+import { processingRoutes } from "./routes/processings.js";
 import { transactionRoutes } from "./routes/transactions.js";
 import { inventoryRoutes } from "./routes/inventory.js";
+import { backupRoutes } from "./routes/backup.js";
 
 const app = Fastify({
   logger: true,
-  disableRequestLogging: true
+  disableRequestLogging: true,
+  bodyLimit: 64 * 1024 * 1024
 });
 
 app.decorate("prisma", prisma);
@@ -35,8 +39,11 @@ app.get("/health", async () => {
 await app.register(authRoutes);
 await app.register(partnerRoutes);
 await app.register(productRoutes);
+await app.register(materialRoutes);
+await app.register(processingRoutes);
 await app.register(transactionRoutes);
 await app.register(inventoryRoutes);
+await app.register(backupRoutes);
 
 const close = async () => {
   try {

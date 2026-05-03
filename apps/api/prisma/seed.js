@@ -16,11 +16,19 @@ async function main() {
     await prisma.user.create({
       data: {
         username,
-        passwordHash
+        passwordHash,
+        role: "super_admin",
+        active: true
       }
     });
     console.log(`Seeded admin user: ${username}`);
   } else {
+    if (existing.role !== "super_admin" || existing.active !== true) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { role: "super_admin", active: true }
+      });
+    }
     console.log(`Admin user already exists: ${username}`);
   }
 }

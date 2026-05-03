@@ -2,11 +2,21 @@ import { Prisma } from "@prisma/client";
 import { getTimeMs, toISODateString } from "../utils/date.js";
 
 const STOCK_INCREASE_TYPES = new Set(["in", "sale_return"]);
-const STOCK_DECREASE_TYPES = new Set(["out", "purchase_return"]);
+const STOCK_DECREASE_TYPES = new Set(["out"]);
+const QUANTITY_SCALE = 4;
+
+function roundToScale(value, scale = QUANTITY_SCALE) {
+  const factor = 10 ** scale;
+  return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
+}
+
+function normalizeStockQuantity(value) {
+  return roundToScale(toNumberValue(value), QUANTITY_SCALE);
+}
 
 function getTransactionDelta(type, quantity) {
-  if (STOCK_INCREASE_TYPES.has(type)) return quantity;
-  if (STOCK_DECREASE_TYPES.has(type)) return -quantity;
+  if (STOCK_INCREASE_TYPES.has(type)) return normalizeStockQuantity(quantity);
+  if (STOCK_DECREASE_TYPES.has(type)) return normalizeStockQuantity(-quantity);
   return 0;
 }
 
@@ -38,7 +48,7 @@ export function buildStockEvents(productId, transactions, adjustments) {
   for (const transaction of transactions) {
     for (const item of transaction.items) {
       if (item.productId !== productId) continue;
-      const delta = getTransactionDelta(transaction.type, item.quantity);
+      const delta = getTransactionDelta(transaction.type, toNumberValue(item.quantity));
       if (!delta) continue;
       events.push({
         eventType: "tx",
@@ -59,7 +69,7 @@ export function buildStockEvents(productId, transactions, adjustments) {
         businessDate: toISODateString(adjustment.bizDate),
         recordedAt: adjustment.recordedAt,
         sortId: adjustment.id,
-        setQty: adjustment.afterQty
+        setQty: normalizeStockQuantity(adjustment.afterQty)
       });
       continue;
     }
@@ -68,7 +78,7 @@ export function buildStockEvents(productId, transactions, adjustments) {
       businessDate: toISODateString(adjustment.bizDate),
       recordedAt: adjustment.recordedAt,
       sortId: adjustment.id,
-      delta: adjustment.changeQty
+      delta: normalizeStockQuantity(adjustment.changeQty)
     });
   }
 
@@ -83,9 +93,9 @@ export function computeStock(events, marker = null) {
   for (const event of events) {
     if (marker && event.markerKey === marker) markerBefore = stock;
     if (event.eventType === "adjust-set") {
-      stock = event.setQty;
+      stock = normalizeStockQuantity(event.setQty);
     } else {
-      stock += event.delta || 0;
+      stock = normalizeStockQuantity(stock + (event.delta || 0));
     }
     if (marker && event.markerKey === marker) markerAfter = stock;
   }

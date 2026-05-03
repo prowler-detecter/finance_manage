@@ -19,6 +19,8 @@ enum TransactionType {
   purchase_return
   receive
   pay
+  receive_diff
+  pay_diff
 }
 
 enum StockAdjustMode {
@@ -26,12 +28,48 @@ enum StockAdjustMode {
   delta
 }
 
+enum InboundLineType {
+  material
+  processing
+}
+
+enum UserRole {
+  super_admin
+  admin
+  user
+}
+
+enum UserRegistrationStatus {
+  pending
+  approved
+  rejected
+}
+
 model User {
-  id           Int      @id @default(autoincrement())
-  username     String   @unique
-  passwordHash String   @map("password_hash")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id                  Int                @id @default(autoincrement())
+  username            String             @unique
+  passwordHash        String             @map("password_hash")
+  role                UserRole           @default(user)
+  active              Boolean            @default(true)
+  reviewedRegistrations UserRegistration[] @relation("RegistrationReviewer")
+  recordedTransactions Transaction[]     @relation("TransactionRecorder")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+}
+
+model UserRegistration {
+  id           Int                    @id @default(autoincrement())
+  username     String
+  passwordHash String                 @map("password_hash")
+  status       UserRegistrationStatus @default(pending)
+  reviewedBy   Int?                   @map("reviewed_by")
+  reviewer     User?                  @relation("RegistrationReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?              @map("reviewed_at")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([username, status])
 }
 
 model Partner {
@@ -63,11 +101,44 @@ model Product {
   @@index([active])
 }
 
+model Material {
+  id               Int                       @id @default(autoincrement())
+  name             String
+  code             String?                   @unique
+  spec             String?
+  unit             String
+  defaultUnitPrice Decimal                   @default(0) @db.Decimal(18, 2) @map("default_unit_price")
+  active           Boolean                   @default(true)
+  inboundLines     InboundLine[]
+  stockAdjustments MaterialStockAdjustment[]
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
+
+  @@index([active])
+}
+
+model Processing {
+  id               Int           @id @default(autoincrement())
+  name             String
+  code             String?       @unique
+  spec             String?
+  unit             String
+  defaultUnitPrice Decimal       @default(0) @db.Decimal(18, 2) @map("default_unit_price")
+  active           Boolean       @default(true)
+  inboundLines     InboundLine[]
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  @@index([active])
+}
+
 model Transaction {
   id               Int               @id @default(autoincrement())
   transactionDate  DateTime          @map("transaction_date")
   bookkeepingDate  DateTime          @map("bookkeeping_date")
   recordedAt       DateTime          @map("recorded_at")
+  recordedById     Int?              @map("recorded_by_id")
+  recordedBy       User?             @relation("TransactionRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
   type             TransactionType
   partnerId        Int               @map("partner_id")
   partner          Partner           @relation(fields: [partnerId], references: [id], onDelete: Restrict)
@@ -80,13 +151,53 @@ model Transaction {
   slipBook         String?           @map("slip_book")
   slipNo           Int?              @map("slip_no")
   items            TransactionItem[]
+  inboundBreakdown InboundBreakdown?
+  inboundLines     InboundLine[]
   sourceChildren   Transaction[]     @relation("SourceTransaction")
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
 
   @@index([partnerId])
+  @@index([recordedById])
   @@index([type, slipBook, slipNo])
   @@index([transactionDate, recordedAt, id])
+}
+
+model InboundBreakdown {
+  id               Int         @id @default(autoincrement())
+  transactionId    Int         @unique @map("transaction_id")
+  transaction      Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  materialAmount   Decimal     @default(0) @db.Decimal(18, 2) @map("material_amount")
+  processingAmount Decimal     @default(0) @db.Decimal(18, 2) @map("processing_amount")
+  materialNote     String?     @map("material_note")
+  processingNote   String?     @map("processing_note")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+}
+
+model InboundLine {
+  id             Int             @id @default(autoincrement())
+  transactionId  Int             @map("transaction_id")
+  transaction    Transaction     @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  materialId     Int?            @map("material_id")
+  material       Material?       @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  processingId   Int?            @map("processing_id")
+  processing     Processing?     @relation(fields: [processingId], references: [id], onDelete: Restrict)
+  lineType       InboundLineType @map("line_type")
+  name           String
+  sku            String?
+  spec           String?
+  unit           String
+  quantity       Decimal         @db.Decimal(18, 4)
+  unitPrice      Decimal         @db.Decimal(18, 2) @map("unit_price")
+  lineAmount     Decimal         @db.Decimal(18, 2) @map("line_amount")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  @@index([transactionId])
+  @@index([materialId])
+  @@index([processingId])
+  @@index([lineType])
 }
 
 model TransactionItem {
@@ -95,7 +206,7 @@ model TransactionItem {
   transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   productId      Int         @map("product_id")
   product        Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
-  quantity       Int
+  quantity       Decimal     @db.Decimal(18, 4)
   unitPrice      Decimal     @db.Decimal(18, 2) @map("unit_price")
   lineAmount     Decimal     @db.Decimal(18, 2) @map("line_amount")
   snapshotName   String      @map("snapshot_name")
@@ -114,6 +225,24 @@ model StockAdjustment {
   productId  Int             @map("product_id")
   product    Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
   mode       StockAdjustMode
+  changeQty  Decimal         @db.Decimal(18, 4) @map("change_qty")
+  beforeQty  Decimal         @db.Decimal(18, 4) @map("before_qty")
+  afterQty   Decimal         @db.Decimal(18, 4) @map("after_qty")
+  bizDate    DateTime        @map("biz_date")
+  remark     String?
+  recordedAt DateTime        @map("recorded_at")
+  operator   String?
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+
+  @@index([productId, bizDate, recordedAt, id])
+}
+
+model MaterialStockAdjustment {
+  id         Int             @id @default(autoincrement())
+  materialId Int             @map("material_id")
+  material   Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  mode       StockAdjustMode
   changeQty  Int             @map("change_qty")
   beforeQty  Int             @map("before_qty")
   afterQty   Int             @map("after_qty")
@@ -124,5 +253,5 @@ model StockAdjustment {
   createdAt  DateTime        @default(now()) @map("created_at")
   updatedAt  DateTime        @updatedAt @map("updated_at")
 
-  @@index([productId, bizDate, recordedAt, id])
+  @@index([materialId, bizDate, recordedAt, id])
 }

@@ -3,10 +3,12 @@ import { authGuard } from "../plugins/auth.js";
 import { parseISODateOrThrow } from "../utils/date.js";
 import { buildStockEvents, computeStock, loadStockData, summarizeBasis, toNumberValue } from "../services/inventory.js";
 
+const QUANTITY_SCALE = 4;
+
 const createAdjustmentSchema = z.object({
   productId: z.number().int().positive(),
   mode: z.enum(["set", "delta"]),
-  quantity: z.number().int(),
+  quantity: z.number().finite(),
   bizDate: z.string().min(1),
   remark: z.string().optional().nullable()
 });
@@ -14,9 +16,20 @@ const createAdjustmentSchema = z.object({
 const previewAdjustmentSchema = z.object({
   productId: z.number().int().positive(),
   mode: z.enum(["set", "delta"]),
-  quantity: z.number().int(),
+  quantity: z.number().finite(),
   bizDate: z.string().min(1)
 });
+
+function roundToScale(value, scale = QUANTITY_SCALE) {
+  const factor = 10 ** scale;
+  return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
+}
+
+function normalizeAdjustmentQuantity(value) {
+  const qty = Number(value);
+  if (!Number.isFinite(qty)) return null;
+  return roundToScale(qty, QUANTITY_SCALE);
+}
 
 function withPendingAdjustment(events, pending) {
   const marker = `pending-${Date.now()}-${Math.random()}`;
@@ -71,11 +84,13 @@ export async function inventoryRoutes(app) {
     try {
       const payload = previewAdjustmentSchema.parse(request.body || {});
       parseISODateOrThrow(payload.bizDate, "bizDate");
+      const quantity = normalizeAdjustmentQuantity(payload.quantity);
+      if (quantity == null) return reply.code(400).send({ message: "数量格式不正确" });
 
-      if (payload.mode === "set" && payload.quantity < 0) {
+      if (payload.mode === "set" && quantity < 0) {
         return reply.code(400).send({ message: "实盘数量不能为负数" });
       }
-      if (payload.mode === "delta" && payload.quantity === 0) {
+      if (payload.mode === "delta" && quantity === 0) {
         return reply.code(400).send({ message: "增减数量不能为0" });
       }
 
@@ -88,7 +103,7 @@ export async function inventoryRoutes(app) {
       const events = buildStockEvents(payload.productId, transactions, adjustments);
       const pending = {
         mode: payload.mode,
-        quantity: payload.quantity,
+        quantity,
         bizDate: payload.bizDate,
         recordedAt: new Date().toISOString(),
         sortId: Date.now()
@@ -119,11 +134,13 @@ export async function inventoryRoutes(app) {
     try {
       const payload = createAdjustmentSchema.parse(request.body || {});
       const bizDate = parseISODateOrThrow(payload.bizDate, "bizDate");
+      const quantity = normalizeAdjustmentQuantity(payload.quantity);
+      if (quantity == null) return reply.code(400).send({ message: "数量格式不正确" });
 
-      if (payload.mode === "set" && payload.quantity < 0) {
+      if (payload.mode === "set" && quantity < 0) {
         return reply.code(400).send({ message: "盘点数量不能为负数" });
       }
-      if (payload.mode === "delta" && payload.quantity === 0) {
+      if (payload.mode === "delta" && quantity === 0) {
         return reply.code(400).send({ message: "增减数量不能为0" });
       }
 
@@ -136,7 +153,7 @@ export async function inventoryRoutes(app) {
       const events = buildStockEvents(payload.productId, transactions, adjustments);
       const pending = {
         mode: payload.mode,
-        quantity: payload.quantity,
+        quantity,
         bizDate: payload.bizDate,
         recordedAt: new Date().toISOString(),
         sortId: Date.now()
@@ -166,7 +183,14 @@ export async function inventoryRoutes(app) {
         }
       });
 
-      return reply.code(201).send({ data: created });
+      return reply.code(201).send({
+        data: {
+          ...created,
+          changeQty: toNumberValue(created.changeQty),
+          beforeQty: toNumberValue(created.beforeQty),
+          afterQty: toNumberValue(created.afterQty)
+        }
+      });
     } catch (error) {
       return reply.code(400).send({
         message: error instanceof Error ? error.message : "参数错误"

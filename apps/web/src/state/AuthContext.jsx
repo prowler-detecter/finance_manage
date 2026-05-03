@@ -15,12 +15,32 @@ export function AuthProvider({ children }) {
     }
 
     apiRequest("/auth/me")
-      .then((res) => setUser(res.user))
+      .then((res) =>
+        setUser({
+          ...res.user,
+          role: res.user?.role || "user",
+          active: res.user?.active !== false
+        })
+      )
       .catch(() => {
         localStorage.removeItem("finance_token");
         setUser(null);
       })
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    function onAuthInvalid(event) {
+      localStorage.removeItem("finance_token");
+      setUser(null);
+      const message = event?.detail?.message;
+      if (message) {
+        window.alert(message);
+      }
+    }
+
+    window.addEventListener("finance_auth_invalid", onAuthInvalid);
+    return () => window.removeEventListener("finance_auth_invalid", onAuthInvalid);
   }, []);
 
   const value = useMemo(() => {
@@ -33,7 +53,11 @@ export function AuthProvider({ children }) {
           body: JSON.stringify({ username, password })
         });
         localStorage.setItem("finance_token", res.token);
-        setUser(res.user);
+        setUser({
+          ...res.user,
+          role: res.user?.role || "user",
+          active: res.user?.active !== false
+        });
       },
       logout() {
         localStorage.removeItem("finance_token");

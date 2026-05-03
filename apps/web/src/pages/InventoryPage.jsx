@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "../lib/api";
+
+const QUANTITY_SCALE = 4;
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -13,8 +15,15 @@ function isValidISODate(text) {
   return dt.toISOString().slice(0, 10) === text;
 }
 
-function isIntegerText(text) {
-  return /^-?\d+$/.test(String(text || "").trim());
+function roundToScale(value, scale = QUANTITY_SCALE) {
+  const factor = 10 ** scale;
+  return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
+}
+
+function normalizeQuantity(value) {
+  const qty = Number(value);
+  if (!Number.isFinite(qty)) return null;
+  return roundToScale(qty, QUANTITY_SCALE);
 }
 
 function formatDateTimeDisplay(value) {
@@ -37,11 +46,19 @@ export default function InventoryPage() {
     remark: ""
   });
   const [previewText, setPreviewText] = useState("");
+  const [nameKeyword, setNameKeyword] = useState("");
 
   const inventoryQuery = useQuery({
     queryKey: ["inventory"],
     queryFn: async () => (await apiRequest("/inventory/overview")).data
   });
+
+  const filteredInventoryRows = useMemo(() => {
+    const rows = inventoryQuery.data || [];
+    const keyword = String(nameKeyword || "").trim().toLowerCase();
+    if (!keyword) return rows;
+    return rows.filter((row) => String(row.name || "").toLowerCase().includes(keyword));
+  }, [inventoryQuery.data, nameKeyword]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload) =>
@@ -92,14 +109,9 @@ export default function InventoryPage() {
       return;
     }
 
-    if (!isIntegerText(quantityRaw)) {
-      setPreviewText("数量必须为整数。");
-      return;
-    }
-
-    const quantity = Number(quantityRaw);
-    if (!Number.isInteger(quantity)) {
-      setPreviewText("数量必须为整数。");
+    const quantity = normalizeQuantity(quantityRaw);
+    if (quantity == null) {
+      setPreviewText("数量格式不正确。");
       return;
     }
 
@@ -159,14 +171,9 @@ export default function InventoryPage() {
       window.alert("请填写库存数量");
       return;
     }
-    if (!isIntegerText(quantityRaw)) {
-      window.alert("数量必须为整数");
-      return;
-    }
-
-    const quantity = Number(quantityRaw);
-    if (!Number.isInteger(quantity)) {
-      window.alert("数量必须为整数");
+    const quantity = normalizeQuantity(quantityRaw);
+    if (quantity == null) {
+      window.alert("数量格式不正确");
       return;
     }
 
@@ -203,10 +210,19 @@ export default function InventoryPage() {
 
       <div className="card">
         <h3>库存总览与盘点调整</h3>
+        <div className="inline-row">
+          <input
+            type="text"
+            placeholder="按名称检索库存项"
+            value={nameKeyword}
+            onChange={(e) => setNameKeyword(e.target.value)}
+          />
+          <span className="muted-text">匹配 {filteredInventoryRows.length} / {(inventoryQuery.data || []).length} 条</span>
+        </div>
         {inventoryQuery.isLoading ? <p>加载中...</p> : null}
         {inventoryQuery.isError ? <p className="error-text">{inventoryQuery.error.message}</p> : null}
 
-        <table id="inventory-table">
+        <table id="inventory-table" className="fixed-table inventory-table">
           <thead>
             <tr>
               <th>名称</th>
@@ -221,7 +237,7 @@ export default function InventoryPage() {
             </tr>
           </thead>
           <tbody>
-            {(inventoryQuery.data || []).map((p) => {
+            {filteredInventoryRows.map((p) => {
               const stock = Number(p.stock || 0);
               const stockClass = stock < 0 ? "negative-stock" : stock > 0 ? "positive-stock" : "";
               const latestBizText = p.latestBusinessDate
