@@ -76,12 +76,13 @@ export default function LoginPage() {
         </div>
 
         {mode === "login" ? (
-          <form onSubmit={onLogin}>
+          <form onSubmit={onLogin} autoComplete="off">
             <h1>系统登录</h1>
             <label>
               用户名
               <input
                 value={loginForm.username}
+                autoComplete="off"
                 onChange={(e) => setLoginForm((v) => ({ ...v, username: e.target.value }))}
                 required
               />
@@ -91,6 +92,7 @@ export default function LoginPage() {
               <input
                 type="password"
                 value={loginForm.password}
+                autoComplete="new-password"
                 onChange={(e) => setLoginForm((v) => ({ ...v, password: e.target.value }))}
                 required
               />
@@ -102,13 +104,14 @@ export default function LoginPage() {
             </button>
           </form>
         ) : (
-          <form onSubmit={onRegister}>
+          <form onSubmit={onRegister} autoComplete="off">
             <h1>新用户注册</h1>
             <p className="muted-text">提交后需管理员审核通过才可登录。</p>
             <label>
               用户名
               <input
                 value={registerForm.username}
+                autoComplete="off"
                 onChange={(e) => setRegisterForm((v) => ({ ...v, username: e.target.value }))}
                 required
               />
@@ -118,6 +121,7 @@ export default function LoginPage() {
               <input
                 type="password"
                 value={registerForm.password}
+                autoComplete="new-password"
                 onChange={(e) => setRegisterForm((v) => ({ ...v, password: e.target.value }))}
                 required
               />
