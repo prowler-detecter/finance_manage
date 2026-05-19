@@ -5,7 +5,7 @@ import { useAuth } from "../state/AuthContext";
 export default function LoginPage() {
   const { login } = useAuth();
   const [mode, setMode] = useState("login");
-  const [loginForm, setLoginForm] = useState({ username: "admin", password: "admin123456" });
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [registerForm, setRegisterForm] = useState({ username: "", password: "" });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
